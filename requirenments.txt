@@ -1,0 +1,17 @@
+pandas
+numpy>=1.21.2
+requests
+scikit-learn
+xgboost
+matplotlib
+seaborn
+lxml
+beautifulsoup4
+openpyxl
+nbimporter
+nbformat
+pickle-mixin
+streamlit
+joblib
+google-generativeai
+nba_api
