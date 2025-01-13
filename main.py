@@ -3,7 +3,6 @@ import pickle
 import requests
 import streamlit as st
 import textwrap
-import google.generativeai as genai
 from dotenv import load_dotenv
 import numpy as np
 import pandas as pd 
