@@ -16,3 +16,4 @@ joblib
 google-generativeai
 nba_api
 python-dotenv
+gorq
