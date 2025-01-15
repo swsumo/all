@@ -3,33 +3,33 @@ import pickle
 import requests
 import streamlit as st
 import textwrap
-from dotenv import load_dotenv
+
 import numpy as np
-import pandas as pd 
+import pandas as pd
+from groq import Groq
 
 # Load environment variables
-load_dotenv()
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "417422402cmsh6e6ff0c00a5cb3fp1ca598jsn937b61106ee8")
 RAPIDAPI_HOST = "nfl-api-data.p.rapidapi.com"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "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")
 
-
-# Helper functions for Streamlit formatting
-def to_markdown(text):
-    text = text.replace('\u2022', '  *')
-    return textwrap.indent(text, '> ', predicate=lambda _: True)
-
+# Helper functions
 def load_model(model_path):
     """Load the trained model from a pickle file."""
     with open(model_path, 'rb') as f:
         return pickle.load(f)
+
+def to_markdown(text):
+    """Convert text to markdown format."""
+    text = text.replace('\u2022', '  *')
+    return textwrap.indent(text, '> ', predicate=lambda _: True)
 
 # Load models
 nfl_winner_model = load_model('models/nfl_winner_model.pkl')
 nba_player_model = load_model('models/linear_regression_model_player.pkl')
 nhl_model = load_model('models/best_rf_model.pkl')
 
-# NHL Prediction Functions
+# NHL Functions
 def fetch_live_scores_nhl():
     url = "https://api-web.nhle.com/v1/score/now"
     try:
@@ -53,7 +53,7 @@ def fetch_live_scores_nhl():
         return pd.DataFrame()
 
 def preprocess_live_scores_nhl(live_scores, trained_features):
-    """Preprocess live game data to match the trained model's feature set."""
+    """Preprocess live NHL game data."""
     if live_scores.empty:
         return pd.DataFrame(columns=trained_features)
     live_scores.fillna(0, inplace=True)
@@ -62,7 +62,7 @@ def preprocess_live_scores_nhl(live_scores, trained_features):
             live_scores[col] = 0
     return live_scores[trained_features]
 
-# NFL Prediction Functions
+# NFL Functions
 def fetch_live_scores_nfl():
     url = f"https://{RAPIDAPI_HOST}/nfl-livescores"
     headers = {
@@ -78,55 +78,65 @@ def fetch_live_scores_nfl():
         return None
 
 def predict_winner_nfl(home_team, away_team):
-    """Predict winner between home and away team."""
-    teams = [home_team, away_team]
-    prediction = nfl_winner_model.predict([teams]) 
-    return "Home" if prediction == 1 else "Away"
+    """Predict NFL game winner using GROQ API."""
+    client = Groq(api_key=GROQ_API_KEY)
+    prompt = f"Based on NFL historical data and team performance, who is likely to win: {home_team} (home) vs {away_team} (away)?"
+    try:
+        chat_completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+        )
+        return chat_completion.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Error: {e}"
 
-# NBA Prediction Functions
-def get_gemini_response(question):
-    """Fetch response from Gemini model."""
-    model = genai.GenerativeModel('gemini-pro')
-    response = model.generate_content(question)
-    return response.text
+# NBA Functions
+def get_groq_response(prompt):
+    """Fetch response from GROQ model."""
+    client = Groq(api_key=GROQ_API_KEY)
+    try:
+        chat_completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+        )
+        return chat_completion.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Error: {e}"
 
 def predict_winner_nba(home_team, away_team):
-    """Predict winner between home and away team using Gemini model."""
+    """Predict NBA game winner."""
     prompt = f"Based on NBA historical data and team performance, who is likely to win: {home_team} (home) vs {away_team} (away)?"
-    return get_gemini_response(prompt)
+    return get_groq_response(prompt)
 
-def player_points_prediction_nba(player_name):
-    """Get points prediction for the player using Gemini model."""
-    prompt = (f"Provide a detailed analysis of {player_name}'s performance, including points scored in the 2022-2023 and 2023-2024 seasons, "
-              "and the current season 2024-2025. Include a brief analysis of trends and expectations.")
-    return get_gemini_response(prompt)
+def player_points_prediction(player_name):
+    """Predict NBA player performance."""
+    prompt = (f"Provide an analysis of {player_name}'s performance in the last three NBA seasons, "
+              "including trends and expectations.")
+    return get_groq_response(prompt)
 
-def predict_mvp_nba():
-    """Predict the most likely MVP for the current NBA season using Gemini model."""
-    prompt = "Based on current NBA performance and historical trends, who is most likely to win the MVP award for the 2024-2025 season?"
-    return get_gemini_response(prompt)
+def predict_mvp():
+    """Predict NBA MVP."""
+    prompt = "Who is the most likely MVP for the current NBA season?"
+    return get_groq_response(prompt)
 
 # Streamlit App
 def main():
     st.set_page_config(page_title="Sports Prediction Models", layout="wide")
     st.title("Sports Prediction Models")
 
-    # Choose sport
-    sport = st.selectbox("Choose Sport", options=["NHL", "NFL", "NBA"])
+    # Navigation
+    sport = st.sidebar.selectbox("Choose Sport", ["NHL", "NFL", "NBA"])
 
     if sport == "NHL":
-        # NHL Prediction Section
-        st.subheader("NHL Prediction")
+        st.subheader("NHL Predictions")
         live_scores = fetch_live_scores_nhl()
         if live_scores.empty:
             st.warning("No live games available.")
         else:
             st.write("Live Scores:", live_scores)
-
             trained_features = nhl_model.feature_names_in_
             processed_scores = preprocess_live_scores_nhl(live_scores, trained_features)
             predictions = nhl_model.predict(processed_scores)
-
             live_scores['Predicted Winner'] = [
                 row['Home_Team'] if pred == 1 else row['Away_Team']
                 for row, pred in zip(live_scores.to_dict('records'), predictions)
@@ -134,12 +144,7 @@ def main():
             st.write("Predictions:", live_scores[["Home_Team", "Away_Team", "Predicted Winner"]])
 
     elif sport == "NFL":
-        # NFL Prediction Section
-        st.subheader("NFL Prediction")
-        live_scores = fetch_live_scores_nfl()
-        if live_scores:
-            st.write("Live Scores:", live_scores)
-
+        st.subheader("NFL Predictions")
         teams = [
             "Arizona Cardinals", "Atlanta Falcons", "Baltimore Ravens", "Buffalo Bills",
             "Carolina Panthers", "Chicago Bears", "Cincinnati Bengals", "Cleveland Browns",
@@ -150,47 +155,40 @@ def main():
             "New York Jets", "Philadelphia Eagles", "Pittsburgh Steelers", "San Francisco 49ers",
             "Seattle Seahawks", "Tampa Bay Buccaneers", "Tennessee Titans", "Washington Commanders"
         ]
-
-        team1 = st.selectbox("Select Team 1", options=teams)
-        team2 = st.selectbox("Select Team 2", options=teams)
-
-        if team1 == team2:
-            st.warning("Please select two different teams.")
-        else:
-            if st.button("Predict Winner"):
+        team1 = st.selectbox("Select Home Team", teams)
+        team2 = st.selectbox("Select Away Team", teams)
+        if st.button("Predict Winner"):
+            if team1 != team2:
                 winner = predict_winner_nfl(team1, team2)
                 st.success(f"The predicted winner is: **{winner}**")
+            else:
+                st.warning("Please select two different teams.")
 
     elif sport == "NBA":
-        # NBA Prediction Section
-        st.subheader("NBA Prediction")
-
-        options = ["Winner Prediction", "Player Points Prediction", "MVP Prediction"]
-        choice = st.radio("Select a feature:", options)
-
+        st.subheader("NBA Predictions")
+        choice = st.radio("Choose a feature", ["Winner Prediction", "Player Performance", "MVP Prediction"])
         if choice == "Winner Prediction":
-            home_team = st.text_input("Enter Home Team:")
-            away_team = st.text_input("Enter Away Team:")
+            home_team = st.text_input("Enter Home Team")
+            away_team = st.text_input("Enter Away Team")
             if st.button("Predict Winner"):
                 if home_team and away_team:
                     result = predict_winner_nba(home_team, away_team)
-                    st.write(f"Prediction: {result}")
+                    st.success(f"Prediction: {result}")
                 else:
-                    st.error("Please enter both home and away team names.")
-
-        elif choice == "Player Points Prediction":
-            player_name = st.text_input("Enter Player Name:")
-            if st.button("Predict Points"):
-                if player_name:
-                    points_result = player_points_prediction_nba(player_name)
-                    st.write(f"Prediction: {points_result}")
+                    st.error("Enter both teams.")
+        elif choice == "Player Performance":
+            player = st.text_input("Enter Player Name")
+            if st.button("Predict Player Performance"):
+                if player:
+                    result = player_points_prediction(player)
+                    st.success(result)
                 else:
-                    st.error("Please enter a player name.")
-
+                    st.error("Enter a player name.")
         elif choice == "MVP Prediction":
             if st.button("Predict MVP"):
-                mvp_result = predict_mvp_nba()
-                st.write(f"Prediction: {mvp_result}")
+                result = predict_mvp()
+                st.success(result)
 
 if __name__ == "__main__":
     main()
+
